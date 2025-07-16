@@ -1,0 +1,83 @@
+name: Android Nightly Build
+
+on:
+  push:
+    branches: ["main"]
+  schedule:
+    # Build automatically at 2 AM every day
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "yarn"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set Yarn version
+        run: yarn set version 4
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Setup Expo CLI
+        uses: expo/expo-github-action@v8
+        with:
+          expo-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Setup EAS CLI
+        run: npm install -g @expo/eas-cli
+
+      - name: Install jq tool
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Build Android APK
+        run: eas build --platform android --profile preview --non-interactive --wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Download build artifact
+        run: |
+          # Get the latest build download link
+          echo "Getting build information..."
+          BUILD_INFO=$(eas build:list --platform=android --limit=1 --json)
+          echo "Build info: $BUILD_INFO"
+          BUILD_URL=$(echo "$BUILD_INFO" | jq -r '.[0].artifacts.buildUrl')
+          echo "Download URL: $BUILD_URL"
+
+          if [ "$BUILD_URL" != "null" ] && [ -n "$BUILD_URL" ]; then
+            echo "Starting APK download..."
+            wget -O cherry-studio-nightly.apk "$BUILD_URL"
+            echo "APK download completed"
+          else
+            echo "Error: Unable to get build download link"
+            exit 1
+          fi
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: nightly-${{ github.run_number }}
+          name: Cherry Studio Nightly Build
+          body: |
+            🌙 Nightly automated build version
+
+            Build time: ${{ github.event.head_commit.timestamp }}
+            Commit: ${{ github.sha }}
+
+            ⚠️ This is a development version and may contain incomplete features and bugs
+          files: cherry-studio-nightly.apk
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
